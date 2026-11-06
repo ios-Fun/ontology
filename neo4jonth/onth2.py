@@ -26,8 +26,8 @@ def run_cypher(cypher: str, params: dict | None = None):
     return records
 
 # 定义二维数组
-# type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征', '测点']
-type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征', '测点']
+full_type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征', '测点']
+type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征']
 entity_arr = []
 for item in type_list:
     item_list = []
@@ -44,7 +44,7 @@ def getIndex(labels):
         if item != "Entity" and item != "Model" and item != "Instance":
             label_str = item
             break
-    for index,item in enumerate(type_list):
+    for index,item in enumerate(full_type_list):
         if label_str == item:
             return index
     return -1
@@ -92,7 +92,7 @@ def deal_PartOf(index):
         from_node_value.add_partOf(to_node_value)
 
     # 实例
-    t_cyper2 = f"MATCH (m:Entity:Instance)-[:CHILD_NODE]->(n:`{type}`:Entity:Instance) RETURN m,n, labels(m) as labels_m"
+    t_cyper2 = f"MATCH (m:Entity:Instance)-[:CHILD_NODE]->(n:`{type}`:Entity:Instance) RETURN m,n, labels(m) as labels_m, apoc.meta.cypher.types(m) AS propTypeMap"
     t_results2 = run_cypher(t_cyper2)
     deal_name_dic2 = entity_arr[index][2]
     for item in t_results2:
@@ -124,6 +124,25 @@ def deal_PartOf(index):
         from_node_index = getIndex(from_node_labels)
         if from_node_index == -1:
             continue
+        if from_node_index == 7:
+            # 测点, 挂在特征的model下
+            pName = to_node_value.pName
+            # 特征实例的父节点
+            p_Node = None
+            if pName not in deal_name_dic1:
+                if pName not in entity_arr[index][0]:
+                    print(f"error p_Node: {from_node_key}")
+                    continue
+                p_Node = entity_arr[index][0][pName]
+            else:
+                p_Node = deal_name_dic1[pName]
+
+            propTypeMap = item['propTypeMap']
+            treeNode = OwlTreeNode(from_node_key, from_node, 2, pName=pName, propTypeMap=propTypeMap)
+            deal_name_dic2[from_node_key] = treeNode
+            p_Node.add_child(treeNode)
+            from_node_index = from_node_index - 1
+
         from_type_dic = entity_arr[from_node_index][2]
         if from_node_key not in from_type_dic:
             print(f"error2-16: {from_node_key}")
@@ -144,16 +163,6 @@ def deal_subClass_type(index):
     # 顶层节点，如电厂
     topNode = OwlTreeNode(type, {}, -1, pName="", propTypeMap={})
     tree.root.add_child(topNode)
-
-    kaiguan_Node = None
-    moni_Node = None
-    if type == "测点":
-        kaiguan_Node = OwlTreeNode('开关量', {}, -1, pName=type, propTypeMap={})
-        topNode.add_child(kaiguan_Node)
-        kaiguan_Node.add_parent(topNode)
-        moni_Node = OwlTreeNode('模拟量', {}, -1, pName=type, propTypeMap={})
-        topNode.add_child(moni_Node)
-        moni_Node.add_parent(topNode)
 
     deal_name_dic0 = entity_arr[index][0]
     # 处理重名
@@ -302,17 +311,6 @@ def deal_subClass_type(index):
         else:
             print(f"error2-7: {value['名称']}")
             format_name = value['名称']
-        if type == "测点":
-            if value['数据类型'] == '模拟量':
-                treeNode = OwlTreeNode(format_name, value, 2, pName="模拟量", propTypeMap=propTypeMap)
-                moni_Node.add_child(treeNode)
-                treeNode.add_parent(moni_Node)
-            elif value['数据类型'] == '开关量':
-                treeNode = OwlTreeNode(format_name, value, 2, pName="开关量", propTypeMap=propTypeMap)
-                kaiguan_Node.add_child(treeNode)
-                treeNode.add_parent(kaiguan_Node)
-            else:
-                print(f"error kaiguang: {format_name}")
 
         if format_name not in deal_name_dic2:
             treeNode = OwlTreeNode(format_name, value, 2, pName="", propTypeMap=propTypeMap)
@@ -516,6 +514,8 @@ def collect_ref(node, res, visited):
                         iso_str = dt.strftime('%Y-%m-%dT%H:%M:%S')
                         g.add((class_uri, class_Annotation, Literal(iso_str, datatype=XSD.dateTime)))
                     else:
+                        if key == '测点类型（DCS）':
+                            continue
                         g.add((class_uri, class_Annotation, Literal(node.value[key], datatype=xsd_type)))
     for c in node.children:
         collect_ref(c, res, visited)
@@ -529,6 +529,7 @@ def pre_order(node, level=0):
     if level  > 20:
         print(f"node: {node}")
     if node.type >= -1:
+        class_uri = base_ns[node.name]
         if node.type == 2:
             # 2 -- 实例 定义为实例
             instance_uri = instance_ns[node.name]
@@ -549,11 +550,13 @@ def pre_order(node, level=0):
                     iso_str = dt.strftime('%Y-%m-%dT%H:%M:%S')
                     g.add((instance_uri, base_ns[key], Literal(iso_str, datatype=XSD.dateTime)))
                 else:
+                    if key == '测点类型（DCS）':
+                        continue
                     g.add((instance_uri, base_ns[key], Literal(node.value[key], datatype=xsd_type)))
         else:
             # 0和1： 模板和模型，定义为class
             # 子类
-            class_uri = base_ns[node.name]
+
             g.add((class_uri, RDF.type, OWL.Class))
             if len(node.pName) > 0:
                 g.add((class_uri, RDFS.subClassOf, base_ns[node.pName]))
@@ -563,12 +566,13 @@ def pre_order(node, level=0):
             if node.type > -1:
                 g.add((class_uri, RDFS.label, Literal(node.value['名称'], datatype=XSD.string)))
             for key, value in node.propTypeMap.items():
-                prop_uri = base_ns[key]
-                g.add((prop_uri, RDF.type, OWL.DatatypeProperty))
-                g.add((prop_uri, RDFS.domain, class_uri))
+                # prop_uri = base_ns[key]
+                # g.add((prop_uri, RDF.type, OWL.DatatypeProperty))
+                # g.add((prop_uri, RDFS.domain, class_uri))
                 xsd_type = type_mapping.get(value.upper(), XSD.string)
-                g.add((prop_uri, RDFS.range, xsd_type))
-
+                # g.add((prop_uri, RDFS.range, xsd_type))
+                if len(value) == 0:
+                    continue
                 # 添加注释
                 class_Annotation = annotation_ns[key]
                 g.add((class_Annotation, RDF.type, OWL.AnnotationProperty))
@@ -586,16 +590,19 @@ def pre_order(node, level=0):
                     g.add((class_uri, class_Annotation, Literal(node.value[key], datatype=xsd_type)))
                 # g.add((class_uri, class_Annotation, Literal(node.value[key], datatype=xsd_type)))
 
-        part_of = base_ns["partOf"]
-        g.add((part_of, RDF.type, OWL.TransitiveProperty))
         # 添加关系
         for part in node.partOfTo:
             if node.type == 2:
                 # 实例
+                # print("aa")
+                belongsTo = base_ns["belongsTo"]
+                g.add((belongsTo, RDF.type, OWL.TransitiveProperty))
                 instance_uri = instance_ns[node.name]
                 partToUri = instance_ns[part.name]
-                g.add((instance_uri, part_of, partToUri))
+                g.add((instance_uri, belongsTo, partToUri))
             else:
+                part_of = base_ns["partOf"]
+                g.add((part_of, RDF.type, OWL.TransitiveProperty))
                 g.add((part_of, RDFS.domain, class_uri))
                 partToUri = base_ns[part.name]
                 g.add((part_of, RDFS.range, partToUri))
@@ -608,7 +615,11 @@ pre_order(tree.root, 0)
 
 result_str = g.serialize(format="turtle")
 
-with open('example4.ttl', 'w', encoding="utf-8") as f:
+with open('dam.ttl', 'w', encoding="utf-8") as f:
     f.write(result_str)
+
+result_str1 = g.serialize(format="xml")
+with open('dam.owl', 'w', encoding="utf-8") as f:
+    f.write(result_str1)
 
 driver.close()
