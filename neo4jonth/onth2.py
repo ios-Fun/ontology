@@ -539,6 +539,8 @@ def pre_order(node, level=0):
             g.add((instance_uri, RDFS.label, Literal(node.value['名称'], datatype=XSD.string)))
             for key, value in node.propTypeMap.items():
                 xsd_type = type_mapping.get(value.upper(), XSD.string)
+                # if len(node.value[key]) == 0:
+                #     continue
                 # g.add((instance_uri, base_ns[key], Literal(node.value[key], datatype=xsd_type)))
                 if key == "createdTime":
                     sec = 0
@@ -547,8 +549,8 @@ def pre_order(node, level=0):
                     except Exception as e:
                         print(e)
                     dt = datetime.fromtimestamp(sec, tz=timezone(timedelta(hours=8)))
-                    iso_str = dt.strftime('%Y-%m-%dT%H:%M:%S')
-                    g.add((instance_uri, base_ns[key], Literal(iso_str, datatype=XSD.dateTime)))
+                    iso_str = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    g.add((instance_uri, base_ns[key], Literal(iso_str, datatype=XSD.string)))
                 else:
                     if key == '测点类型（DCS）':
                         continue
@@ -566,12 +568,12 @@ def pre_order(node, level=0):
             if node.type > -1:
                 g.add((class_uri, RDFS.label, Literal(node.value['名称'], datatype=XSD.string)))
             for key, value in node.propTypeMap.items():
-                # prop_uri = base_ns[key]
-                # g.add((prop_uri, RDF.type, OWL.DatatypeProperty))
-                # g.add((prop_uri, RDFS.domain, class_uri))
                 xsd_type = type_mapping.get(value.upper(), XSD.string)
+                prop_uri = base_ns[key]
+                g.add((prop_uri, RDF.type, OWL.DatatypeProperty))
+                # g.add((prop_uri, RDFS.domain, class_uri))
                 # g.add((prop_uri, RDFS.range, xsd_type))
-                if len(value) == 0:
+                if value == "STRING" and len(node.value[key]) == 0:
                     continue
                 # 添加注释
                 class_Annotation = annotation_ns[key]
@@ -584,11 +586,10 @@ def pre_order(node, level=0):
                     except Exception as e:
                         print(e)
                     dt = datetime.fromtimestamp(sec, tz=timezone(timedelta(hours=8)))
-                    iso_str = dt.strftime('%Y-%m-%dT%H:%M:%S')
-                    g.add((class_uri, class_Annotation, Literal(iso_str, datatype=XSD.dateTime)))
+                    iso_str = dt.strftime('%Y-%m-%d %H:%M:%S')
+                    g.add((class_uri, class_Annotation, Literal(iso_str, datatype=XSD.string)))
                 else:
                     g.add((class_uri, class_Annotation, Literal(node.value[key], datatype=xsd_type)))
-                # g.add((class_uri, class_Annotation, Literal(node.value[key], datatype=xsd_type)))
 
         # 添加关系
         for part in node.partOfTo:
