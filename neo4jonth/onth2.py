@@ -29,8 +29,12 @@ def run_cypher(cypher: str, params: dict | None = None):
     return records
 
 # 定义二维数组
-full_type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征', '测点','故障模式']
-type_list = ['故障模式']
+# full_type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征', '测点','故障模式']
+# type_list = ['故障模式']
+
+full_type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征', '测点']
+type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征']
+
 entity_arr = []
 for item in type_list:
     item_list = []
@@ -656,11 +660,16 @@ def pre_order(node, level=0):
             # 0和1： 模板和模型，定义为class
             # 子类
 
+
+
             g.add((class_uri, RDF.type, OWL.Class))
             if len(node.pName) > 0:
                 g.add((class_uri, RDFS.subClassOf, base_ns[node.pName]))
                 # if len(node.parents) > 1:
                 #     print(f"node1: {node.name}")
+            # prop_uri = base_ns['modelFaultLogicDescription']
+            # hasName = Property(prop_uri, graph=g, range=XSD.string)
+            # Restriction(hasName,g, value=URIRef(base_ns['id']),identifier=prop_uri)
             # 添加属性
             if node.type > -1:
                 g.add((class_uri, RDFS.label, Literal(node.value['名称'], datatype=XSD.string)))
