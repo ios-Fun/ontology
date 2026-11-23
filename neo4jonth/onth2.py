@@ -5,9 +5,12 @@ from neo4j import GraphDatabase
 
 from neo4jonth.OwlTree import OwlTree
 from neo4jonth.OwlTreeNode import OwlTreeNode
-from rdflib import OWL, RDF, RDFS, XSD, Graph, Namespace, URIRef, Literal
+from rdflib import OWL, RDF, RDFS, XSD, Graph, Namespace, URIRef, Literal, BNode
 from datetime import datetime, timezone, timedelta
 from rdflib.extras.infixowl import Class, Property, Restriction
+import pandas as pd
+
+from neo4jonth.defect.defectGraphToLan import parseDefectById
 
 URI = "bolt://localhost:7687"
 AUTH = ("neo4j", "P@ssw0rd")
@@ -29,12 +32,13 @@ def run_cypher(cypher: str, params: dict | None = None):
     return records
 
 # 定义二维数组
-# full_type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征', '测点','故障模式']
-# type_list = ['故障模式']
+full_type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征', '测点','故障模式']
+type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征','', '故障模式']
 
-full_type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征', '测点']
-type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征']
+# full_type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征', '测点']
+# type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征']
 
+# 二维数组，一维是full_type_list，二维是模板，模型，实例
 entity_arr = []
 for item in type_list:
     item_list = []
@@ -46,18 +50,23 @@ for item in type_list:
 tree = OwlTree("root")
 
 def getIndex(labels):
-    label_str = ''
-    for item in labels:
-        if item != "Entity" and item != "Model" and item != "Instance":
-            label_str = item
-            break
-    for index,item in enumerate(full_type_list):
-        if label_str == item:
+    for index, item in enumerate(full_type_list):
+        if item in labels:
             return index
+    # label_str = ''
+    # for item in labels:
+    #     if item != "Entity" and item != "Model" and item != "Instance":
+    #         label_str = item
+    #         break
+    # for index,item in enumerate(full_type_list):
+    #     if label_str == item:
+    #         return index
     return -1
 # 处理child关系
 def deal_PartOf(index):
     type = type_list[index]
+    if len(type) == 0:
+        return ""
     entity_type_str = ''
     if type == "故障模式":
         entity_type_str = 'Logic'
@@ -65,13 +74,18 @@ def deal_PartOf(index):
         entity_type_str = 'Entity'
     print(f"type1:{type}")
     # 模型
-    t_cyper1 = f"MATCH (m:{entity_type_str}:Model)-[:CHILD_NODE]->(n:`{type}`:{entity_type_str}:Model) RETURN m,n, labels(m) as labels_m"
+    t_cyper1 = f"MATCH (m:{entity_type_str}:Model)-[:CHILD_NODE]->(n:`{type}`:Entity:Model) RETURN m,n, labels(m) as labels_m, labels(n) as labels_n"
+    if type == "故障模式":
+        t_cyper1 = f"MATCH (m:`{type}`:{entity_type_str}:Model)-[:CHILD_NODE]->(n:Entity:Model) RETURN m,n, labels(m) as labels_m, labels(n) as labels_n"
+
     t_results1 = run_cypher(t_cyper1)
     deal_name_dic1 = entity_arr[index][1]
+    print(f"Model count:{len(t_results1)}")
     for item in t_results1:
         from_node = item['m']
         to_node = item['n']
         from_node_labels = item['labels_m']
+        to_node_labels = item['labels_n']
         # to_node_key = f"{to_node['名称']}_{to_node['编码']}"
         to_node_key = ""
         if '编码' in to_node:
@@ -82,7 +96,12 @@ def deal_PartOf(index):
             # continue
 
         to_node_key = to_node_key.replace(" ", "")
-        to_node_value = deal_name_dic1[to_node_key]
+        to_node_value = None
+        if type == "故障模式":
+            to_node_index = getIndex(to_node_labels)
+            to_node_value = entity_arr[to_node_index][1][to_node_key]
+        else:
+            to_node_value = deal_name_dic1[to_node_key]
         if to_node_value is None:
             print(f"error1: {to_node_key}")
 
@@ -104,14 +123,17 @@ def deal_PartOf(index):
         from_node_value.add_partOf(to_node_value)
 
     # 实例与实例之间的关系
-    t_cyper2 = f"MATCH (m:{entity_type_str}:Instance)-[:CHILD_NODE]->(n:`{type}`:{entity_type_str}:Instance) RETURN m,n, labels(m) as labels_m, apoc.meta.cypher.types(m) AS propTypeMap, id(m) as id_m"
+    t_cyper2 = f"MATCH (m:{entity_type_str}:Instance)-[:CHILD_NODE]->(n:`{type}`:Entity:Instance) RETURN m,n, labels(m) as labels_m, apoc.meta.cypher.types(m) AS propTypeMap, id(m) as id_m, labels(n) as labels_n"
+    if type == "故障模式":
+        t_cyper2 = f"MATCH (m:`{type}`:{entity_type_str}:Instance)-[:CHILD_NODE]->(n:Entity:Instance) RETURN m,n, labels(m) as labels_m, apoc.meta.cypher.types(m) AS propTypeMap, id(m) as id_m, labels(n) as labels_n"
     t_results2 = run_cypher(t_cyper2)
+    print(f"Instance count:{len(t_results2)}")
     deal_name_dic2 = entity_arr[index][2]
     for item in t_results2:
         from_node = item['m']
-
         to_node = item['n']
         from_node_labels = item['labels_m']
+        to_node_labels = item['labels_n']
         # to_node_key = f"{to_node['名称']}_{to_node['编码']}"
         to_node_key = ""
         if '编码' in to_node:
@@ -122,7 +144,13 @@ def deal_PartOf(index):
             # continue
 
         to_node_key = to_node_key.replace(" ", "")
-        to_node_value = deal_name_dic2[to_node_key]
+
+        to_node_value = None
+        if type == "故障模式":
+            to_node_index = getIndex(to_node_labels)
+            to_node_value = entity_arr[to_node_index][2][to_node_key]
+        else:
+            to_node_value = deal_name_dic2[to_node_key]
         if to_node_value is None:
             print(f"error1: {to_node_key}")
 
@@ -170,6 +198,8 @@ def deal_PartOf(index):
 # 获取每个class和实例，以及之间的引用关系（对应owl的子类）
 def deal_subClass_type(index):
     type = type_list[index]
+    if len(type) == 0:
+        return ""
     print(f"type:{type}")
     entity_type_str = ''
     if type == "故障模式":
@@ -215,6 +245,13 @@ def deal_subClass_type(index):
             format_name = value['名称']
         format_name = format_name.replace(" ", "")
         if format_name not in deal_name_dic0:
+            if type == "故障模式":
+                df = pd.DataFrame(columns=["id", "名称", "描述"])
+                defect_content = parseDefectById(0, format_name, value['名称'], df)
+                # defect_content = 'abc'
+                value['modelFaultLogicDescription'] = defect_content
+                propTypeMap['modelFaultLogicDescription'] = 'STRING'
+
             treeNode = OwlTreeNode(format_name, value, 1, pName="", propTypeMap=propTypeMap)
             deal_name_dic1[format_name] = treeNode
             all_name_set1.add(format_name)
@@ -329,6 +366,7 @@ def deal_subClass_type(index):
         propTypeMap = item['propTypeMap']
         propTypeMap['id'] = 'STRING'
         value['id'] = id_m
+
         format_name = ""
         if '编码' in value:
             format_name = value['编码']
@@ -337,6 +375,13 @@ def deal_subClass_type(index):
         else:
             print(f"error2-7: {value['名称']}")
             format_name = value['名称']
+
+        if type == "故障模式":
+            df = pd.DataFrame(columns=["id", "名称", "描述"])
+            defect_content = parseDefectById(0, format_name, value['名称'], df)
+            # defect_content = '1233'
+            value['faultLogicDescription'] = defect_content
+            propTypeMap['faultLogicDescription'] = 'STRING'
 
         if format_name not in deal_name_dic2:
             treeNode = OwlTreeNode(format_name, value, 2, pName="", propTypeMap=propTypeMap)
@@ -526,6 +571,8 @@ def collect_ref(node, res, visited):
                     xsd_type = type_mapping.get(value.upper(), XSD.string)
                     g.add((prop_uri, RDFS.range, xsd_type))
 
+
+
                     # 添加注释
                     class_Annotation = annotation_ns[key]
                     g.add((class_Annotation, RDF.type, OWL.AnnotationProperty))
@@ -551,22 +598,6 @@ def collect_ref(node, res, visited):
 # collect_ref(tree.root, ref_list, set())
 # print(len(ref_list))
 
-# 自底向上遍历
-def bottom_up_level_nodes(root: OwlTreeNode):
-    if not root:
-        return []
-    q = deque([root])
-    levels = []
-    while q:
-        sz = len(q)
-        layer = []
-        for _ in range(sz):
-            n = q.popleft()
-            layer.append(n)
-            for c in n.children:
-                q.append(c)
-        levels.append(layer)
-    # return levels[::-1]
 
 def check_same(node, time):
     if node.type == 1 and len(node.children) > 1:
@@ -632,8 +663,9 @@ def pre_order(node, level=0):
             g.add((instance_uri, RDF.type, p_uri))
             # 给实例增加注释属性
             g.add((instance_uri, RDFS.label, Literal(node.value['名称'], datatype=XSD.string)))
-            for key, value in node.propTypeMap.items():
 
+            for key, value in node.propTypeMap.items():
+                # print(f"key: {key}")
 
                 # if len(node.value[key]) == 0:
                 #     continue
@@ -656,20 +688,17 @@ def pre_order(node, level=0):
                     except Exception as e:
                         print(f"error111: {key}")
                     g.add((instance_uri, base_ns[key], Literal(node.value[key], datatype=xsd_type)))
+
         else:
             # 0和1： 模板和模型，定义为class
             # 子类
-
-
-
             g.add((class_uri, RDF.type, OWL.Class))
             if len(node.pName) > 0:
                 g.add((class_uri, RDFS.subClassOf, base_ns[node.pName]))
                 # if len(node.parents) > 1:
                 #     print(f"node1: {node.name}")
+
             # prop_uri = base_ns['modelFaultLogicDescription']
-            # hasName = Property(prop_uri, graph=g, range=XSD.string)
-            # Restriction(hasName,g, value=URIRef(base_ns['id']),identifier=prop_uri)
             # 添加属性
             if node.type > -1:
                 g.add((class_uri, RDFS.label, Literal(node.value['名称'], datatype=XSD.string)))
@@ -679,6 +708,15 @@ def pre_order(node, level=0):
                 g.add((prop_uri, RDF.type, OWL.DatatypeProperty))
                 # g.add((prop_uri, RDFS.domain, class_uri))
                 # g.add((prop_uri, RDFS.range, xsd_type))
+
+                if key == 'modelFaultLogicDescription':
+                    # 添加class约束
+                    restriction_class1 = BNode()
+                    g.add((restriction_class1, RDF.type, OWL.Restriction))
+                    g.add((restriction_class1, OWL.onProperty, prop_uri))
+                    g.add((class_uri, RDFS.subClassOf, restriction_class1))
+                    g.add((restriction_class1, OWL.hasValue, Literal(node.value[key], datatype=xsd_type)))
+
                 if value == "STRING" and len(node.value[key]) == 0:
                     continue
                 # 添加注释
@@ -696,21 +734,44 @@ def pre_order(node, level=0):
                     g.add((class_uri, class_Annotation, Literal(iso_str, datatype=XSD.string)))
                 else:
                     g.add((class_uri, class_Annotation, Literal(node.value[key], datatype=xsd_type)))
-            prop_uri = base_ns["id"]
-            g.add((prop_uri, RDF.type, OWL.DatatypeProperty))
+            prop_uri_id = base_ns["id"]
+            g.add((prop_uri_id, RDF.type, OWL.DatatypeProperty))
+
+            prop_uri_faultLogicDescription = base_ns["faultLogicDescription"]
+            g.add((prop_uri_faultLogicDescription, RDF.type, OWL.DatatypeProperty))
+
+            # 故障模式model的注释属性
+            # if node.type == 1:
+            #     defect_Annotation_uri = annotation_ns["modelFaultLogicDescription"]
+            #     g.add((defect_Annotation_uri, RDF.type, OWL.AnnotationProperty))
+            #     # 获取故障模式的描述
+            #     df = pd.DataFrame(columns=["id", "名称", "描述"])
+            #     defect_content = parseDefectById(0, node.value['编码'], node.value['名称'], df)
+            #     g.add((defect_Annotation_uri, RDFS.label, Literal("modelFaultLogicDescription")))
+            #     g.add((class_uri, defect_Annotation_uri, Literal(defect_content, datatype=XSD.string)))
 
         # 添加关系
         for part in node.partOfTo:
             if node.type == 2:
+                type_str = 'belongsTo'
+                if '类别' in node.value:
+                    if node.value['类别'] == '故障模式':
+                        type_str = 'defect_belongsTo'
+
+
                 # 实例
                 # print("aa")
-                belongsTo = base_ns["belongsTo"]
+                belongsTo = base_ns[type_str]
                 g.add((belongsTo, RDF.type, OWL.TransitiveProperty))
                 instance_uri = instance_ns[node.name]
                 partToUri = instance_ns[part.name]
                 g.add((instance_uri, belongsTo, partToUri))
             else:
-                part_of = base_ns["partOf"]
+                type_str = 'partOf'
+                if '类别' in node.value:
+                    if node.value['类别'] == '故障模式':
+                        type_str = 'defect_partOf'
+                part_of = base_ns[type_str]
                 g.add((part_of, RDF.type, OWL.TransitiveProperty))
                 g.add((part_of, RDFS.domain, class_uri))
                 partToUri = base_ns[part.name]
