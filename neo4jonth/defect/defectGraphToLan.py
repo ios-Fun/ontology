@@ -11,7 +11,8 @@ import requests
 from neo4jonth.defect.DefectTree import DefectTree
 from neo4jonth.defect.DefectTreeNode import DefectTreeNode
 import pandas as pd
-URI = "bolt://192.168.0.54:7687"
+# URI = "bolt://192.168.0.54:7687"
+URI = "bolt://localhost:7687"
 AUTH = ("neo4j", "P@ssw0rd")
 
 # ========== 连接 ==========
@@ -42,20 +43,66 @@ def tree_depth(node, level) -> int:
                     max_child_depth = d
     return max_child_depth
 
+# 第二层的与模块-带数字
+def useSubAndMoudle(return_str, treeNode, level,maxDepth, index):
+    return_str += f"以下{numToChinese(len(treeNode.children))}类子工况同时发生\n"
+    for item in treeNode.children:
+        child_str = getResultFromChild(item, level + 1, maxDepth, False)[0]
+        if len(child_str) == 0:
+            continue
+        return_str += f"{num_to_circle(index + 1, level)}"
+
+        if not (check_last_punct(child_str)):
+            # if index == len(treeNode.children) - 1:
+            #     child_str += "，"
+            if index >= 0:
+                child_str += "；"
+
+        return_str += child_str
+        if not return_str.endswith('\n'):
+            return_str += "\n"
+        index = index + 1
+    return return_str
+
+# 第二层的或模块-带数字
+def useSubOrMoudle(return_str, treeNode, level,maxDepth, index):
+    return_str += f"以下{numToChinese(len(treeNode.children))}类子工况任意一类发生\n"
+    for item in treeNode.children:
+        child_str = getResultFromChild(item, level + 1, maxDepth, False)[0]
+        if len(child_str) == 0:
+            continue
+        return_str += f"{num_to_circle(index + 1, level)}"
+
+        if not (check_last_punct(child_str)):
+            # if index == len(treeNode.children) - 1:
+            #     child_str += "，"
+            if index >= 0:
+                child_str += "；"
+
+        return_str += child_str
+        if not return_str.endswith('\n'):
+            return_str += "\n"
+        index = index + 1
+    return return_str
+
 # 与模板
 def useAndMoudle(defect_name, firstChildren, maxDepth, defecId, df):
-    result_str = f"{defect_name}可能由以下{numToChinese(len(firstChildren))}种情况引发："
+    result_str = f"{defect_name}需要同时满足以下{numToChinese(len(firstChildren))}组条件："
     result_str += "\n"
     for i in range(len(firstChildren)):
         item_str = getResultFromChild(firstChildren[i], 1, maxDepth,False)[0]
-
-        item_f = strip_second_end_punctuation(f"第{numToChinese(i + 1)}种：{item_str}。\n")
+        item_f = ""
+        if "①" in item_str:
+            item_f = f"条件组{numToChinese(i + 1)}：{strip_end_punctuation(item_str)}\n"
+        else:
+            item_f = strip_second_end_punctuation(f"条件组{numToChinese(i + 1)}：{item_str}。\n")
         result_str += item_f
-    result_str += f"当上述{numToChinese(len(firstChildren))}种情况都出现时，可能发生{defect_name}。"
+    result_str += f"{numToChinese(len(firstChildren))}组条件同时满足时，可能发生{defect_name}。"
     new_row = pd.DataFrame([{"id": defecId, "名称": defect_name, "描述": result_str}])
     # df = pd.concat([df, new_row], ignore_index=True)
     df.loc[len(df)] = [defecId, defect_name, result_str]
     print(result_str)
+    return result_str
 
 # 去掉尾部的符号
 def strip_end_punctuation(text):
@@ -84,7 +131,10 @@ def check_last_punct(text):
     punct = {"，", "。", "；", "：", "？", "！", "、"}
     if not text:  # 空字符串直接返回False
         return False
-    return text[-1] in punct
+    if text.endswith('\n'):
+        return text[-2] in punct
+    else:
+        return text[-1] in punct
 
 # 判断字符串是否以同时开头
 def start_with_tongshi(text):
@@ -94,9 +144,13 @@ def start_with_tongshi(text):
 
 
 # 根据故障模式id得到自然语言
-def parseDefectById(defecId, defect_name, df):
+def parseDefectById(defecId, code, defect_name, df):
     # 先得到故障模式 shadow
-    shadow_cyper1 = f"MATCH(m) -[r: REFERENCE_SHADOW]->(n) where id(n)={defecId} return m, id(m) as id_m"
+    shadow_cyper1 = ''
+    if len(code) == 0:
+        shadow_cyper1 = f"MATCH(m) -[r: REFERENCE_SHADOW]->(n) where id(n)={defecId} return m, id(m) as id_m"
+    else:
+        shadow_cyper1 = f"MATCH(m) -[r: REFERENCE_SHADOW]->(n) where n.编码='{code}' return m, id(m) as id_m"
     shadow_results = run_cypher(shadow_cyper1)
     defectTree = DefectTree("root")
     for res1 in shadow_results:
@@ -123,7 +177,7 @@ def parseDefectById(defecId, defect_name, df):
                     if child.type == 0 and child.name == "或" and len(child.children) > 2:
                         and_flag = True
                 if and_flag:
-                    useAndMoudle(defect_name, firstChildren, maxDepth,defecId, df)
+                    return useAndMoudle(defect_name, firstChildren, maxDepth,defecId, df)
                 else:
                     if len(firstChildren) == 1:
                         # 首层与节点只有一个
@@ -150,6 +204,7 @@ def parseDefectById(defecId, defect_name, df):
                         new_row = pd.DataFrame([{"id": defecId, "名称": defect_name, "描述": return_str}])
                         # df = pd.concat([df, new_row], ignore_index=True)
                         df.loc[len(df)] = [defecId, defect_name, return_str]
+                        return return_str
                     else:
                         return_str = "当"
                         index = 0
@@ -160,14 +215,14 @@ def parseDefectById(defecId, defect_name, df):
                         firstChildren.sort(key=lambda x: x.name != "或")
                         count = sum(1 for x in firstChildren if x.name == "N取M")
                         if count > 1:
-                            useAndMoudle(defect_name, firstChildren, maxDepth,defecId, df)
+                            return useAndMoudle(defect_name, firstChildren, maxDepth,defecId, df)
                         else:
                             orCount = 0
                             for item in firstChildren:
                                 if item.type == 0 and item.name == "或":
                                     orCount += 1
                             if orCount > 1:
-                                useAndMoudle(defect_name, firstChildren, maxDepth, defecId, df)
+                                return useAndMoudle(defect_name, firstChildren, maxDepth, defecId, df)
                             else:
                                 for item in firstChildren:
                                     str_list = getResultFromChild(item, 1, maxDepth, True)
@@ -179,7 +234,10 @@ def parseDefectById(defecId, defect_name, df):
                                     if len(child_str) == 0:
                                         continue
                                     if index == 1:
-                                        return_str += "，且"
+                                        if "①" in return_str:
+                                            return_str += "且"
+                                        else:
+                                            return_str += "，且"
                                     if index > 1:
                                         return_str += "、"
                                     return_str += strip_end_punctuation(child_str)
@@ -200,12 +258,13 @@ def parseDefectById(defecId, defect_name, df):
                                 # df = pd.concat([df, new_row], ignore_index=True)
                                 df.loc[len(df)] = [defecId, defect_name, return_str]
                                 print(return_str)
+                                return return_str
             elif maxDepth == 3:
                 # 换模板
                 if len(firstChildren) == 1:
                     print("warn 12")
                 else:
-                    useAndMoudle(defect_name, firstChildren, maxDepth,defecId, df)
+                    return useAndMoudle(defect_name, firstChildren, maxDepth,defecId, df)
 
         elif name == "或":
             if len(firstChildren) == 1:
@@ -216,10 +275,13 @@ def parseDefectById(defecId, defect_name, df):
                 result_str += "\n"
                 for i in range(len(firstChildren)):
                     item_str = strip_second_end_punctuation(getResultFromChild(firstChildren[i], 1, maxDepth, False)[0])
-                    if check_last_punct(item_str):
-                        item_f = f"第{numToChinese(i + 1)}种：{item_str}\n"
+                    if "①" in item_str:
+                        item_f = f"第{numToChinese(i + 1)}种：{strip_end_punctuation(item_str)}\n"
                     else:
-                        item_f = f"第{numToChinese(i + 1)}种：{item_str}；\n"
+                        if check_last_punct(item_str):
+                            item_f = f"第{numToChinese(i + 1)}种：{item_str}\n"
+                        else:
+                            item_f = f"第{numToChinese(i + 1)}种：{item_str}；\n"
 
                     result_str += item_f
                 result_str += f"当上述{numToChinese(len(firstChildren))}种情况中的任意一种出现时，可能发生{defect_name}。"
@@ -227,6 +289,7 @@ def parseDefectById(defecId, defect_name, df):
                 new_row = pd.DataFrame([{"id": defecId, "名称": defect_name, "描述": result_str}])
                 # df = pd.concat([df, new_row], ignore_index=True)
                 df.loc[len(df)] = [defecId, defect_name, result_str]
+                return result_str
         elif name == "大于":
             return_str = "当"
             child = firstChildren[0]
@@ -238,6 +301,7 @@ def parseDefectById(defecId, defect_name, df):
             new_row = pd.DataFrame([{"id":defecId, "名称":defect_name, "描述":return_str}])
             # df = pd.concat([df, new_row], ignore_index=True)
             df.loc[len(df)] = [defecId, defect_name, return_str]
+            return return_str
         elif name == "N取M":
             result_str = f"{defect_name}可能由以下{numToChinese(len(firstChildren))}种情况引发："
             result_str += "\n"
@@ -261,13 +325,26 @@ def parseDefectById(defecId, defect_name, df):
             new_row = pd.DataFrame([{"id": defecId, "名称": defect_name, "描述": result_str}])
             # df = pd.concat([df, new_row], ignore_index=True)
             df.loc[len(df)] = [defecId, defect_name, result_str]
+            return result_str
         else:
             print(f"error 12: {name}")
+    return ""
 
 # 状态有或修改
 def formatStatus(status):
     res = status.replace("|", "或")
     return res
+
+def num_to_circle(n: int, level) -> str:
+    """把数字转为 ①②③…⑳，大于20返回(21)"""
+    if level <=1:
+        table = "①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮⑯⑰⑱⑲⑳"
+        if 1 <= n <= 20:
+            return table[n - 1]
+        return f"({n})"
+    else:
+        return f"({n})"
+
 # 数字转中文
 def numToChinese(index):
     if index == 1:
@@ -319,6 +396,7 @@ def numToChinese(index):
 # 查询所有故障模式
 def queryAllDefectsMode():
     print("queryAllDefectsMode")
+    # Instance / Model
     t_cyper1 = "MATCH (m:Logic:Model:故障模式) RETURN m, id(m) as id_m"
     results = run_cypher(t_cyper1)
     df = pd.DataFrame(columns=["id", "名称", "描述"])
@@ -328,7 +406,7 @@ def queryAllDefectsMode():
         defect_name = res["m"]["名称"].strip()
         print(defect_name)
         id_m = res["id_m"]
-        parseDefectById(id_m, defect_name, df)
+        parseDefectById(id_m,'', defect_name, df)
     df.to_csv("data.csv", index=False, encoding="utf-8-sig")
 
 # 获取次层节点的显示
@@ -362,42 +440,47 @@ def getResultFromChild(treeNode, level, maxDepth, isFirstAnd: False):
             # 第二层的与
             return_str = ""
             index = 0
-            # 第三层的and
+
             if maxDepth == 3 and level == 2 and len(treeNode.children) > 2:
+                # 第三层的and
                 return_str += f"同时满足以下{numToChinese(len(treeNode.children))}项条件："
-            for item in treeNode.children:
-                child_str = ""
-                child_str += getResultFromChild(item, level+1, maxDepth, False)[0]
-                # print(f"child_str2:{child_str}")
+            if level == 1 and maxDepth == 3:
+                return_str += useSubAndMoudle(return_str, treeNode, level,maxDepth, index)
+            else:
 
-                if maxDepth == 3 and level == 2 and len(treeNode.children) > 2:
-                    # 是第三层的and
-                    if index == 1:
-                        return_str += "、"
-                    elif index == len(treeNode.children) - 1:
-                        return_str += "，以及"
+                for item in treeNode.children:
+                    child_str = ""
+                    child_str += getResultFromChild(item, level+1, maxDepth, False)[0]
+                    # print(f"child_str2:{child_str}")
 
-                else:
-                    if index == 1:
-                        if maxDepth > 2:
-                            if level == 2:
-                                if not start_with_tongshi(child_str):
-                                    return_str += "同时"
+                    if maxDepth == 3 and level == 2 and len(treeNode.children) > 2:
+                        # 是第三层的and
+                        if index == 1:
+                            return_str += "、"
+                        elif index == len(treeNode.children) - 1:
+                            return_str += "，以及"
+
+                    else:
+                        if index == 1:
+                            if maxDepth > 2:
+                                if level == 2:
+                                    if not start_with_tongshi(child_str):
+                                        return_str += "同时"
+                                else:
+                                    # 当前是第二层，还有下一层
+                                    if not start_with_tongshi(child_str):
+                                        return_str += "，同时"
+                                    else:
+                                        return_str += "，"
                             else:
-                                # 当前是第二层，还有下一层
                                 if not start_with_tongshi(child_str):
                                     return_str += "，同时"
                                 else:
                                     return_str += "，"
-                        else:
-                            if not start_with_tongshi(child_str):
-                                return_str += "，同时"
-                            else:
-                                return_str += "，"
-                    if index > 1:
-                        return_str += "、"
-                return_str += child_str
-                index = index + 1
+                        if index > 1:
+                            return_str += "、"
+                    return_str += child_str
+                    index = index + 1
                 #if index < len(treeNode.children)-1:
             return_str += "；"
             return [return_str, "",""]
@@ -483,23 +566,24 @@ def getResultFromChild(treeNode, level, maxDepth, isFirstAnd: False):
                 use_number_or = True
 
             if use_number_or:
-                for item in treeNode.children:
-
-                    child_str = getResultFromChild(item, level + 1, maxDepth,False)[0]
-                    if len(child_str) ==0:
-                        continue
-                    return_str += f"{numToChinese(index + 1)}是"
-
-                    if not (check_last_punct(child_str)):
-                        if index == len(treeNode.children) - 1:
-                            child_str += "，"
-                        elif index >= 0:
-                            child_str += "、"
-
-                    return_str += child_str
-
-                    index = index + 1
-                return_str += "上述情况任意一种出现"
+                return_str += useSubOrMoudle(return_str, treeNode, level,maxDepth, index)
+                # return_str += f"以下{numToChinese(len(treeNode.children))}类子工况任意一类发生\n"
+                # for item in treeNode.children:
+                #     child_str = getResultFromChild(item, level + 1, maxDepth,False)[0]
+                #     if len(child_str) ==0:
+                #         continue
+                #     return_str += f"{num_to_circle(index + 1)}"
+                #
+                #     if not (check_last_punct(child_str)):
+                #         if index == len(treeNode.children) - 1:
+                #             child_str += "，"
+                #         elif index >= 0:
+                #             child_str += "、"
+                #
+                #     return_str += child_str
+                #     return_str += "\n"
+                #     index = index + 1
+                # return_str += "上述情况任意一种出现"
             else:
                 # 或的分支有两个，并且没有其他语言符号，并且主语相同则主语合并，谓语相同则谓语合并
 
@@ -541,17 +625,24 @@ def getResultFromChild(treeNode, level, maxDepth, isFirstAnd: False):
                                 return [f"{child_str_list[0][1]}或{child_str_list[1][1]}{range_str}", "", ""]
                         else:
                             canMerge = False
-
+                # 判断是否包含或
+                contain_or = False
                 for item in treeNode.children:
                     child_str = getResultFromChild(item, level + 1, maxDepth, False)[0]
-                    # if index == 1:
-                    #     return_str += "或"
-                    if index >= 1:
-                        return_str += "、"
+                    if "或" in child_str:
+                        contain_or = True
+                        break
+                if contain_or:
+                    return_str += useSubOrMoudle(return_str, treeNode, level,maxDepth, index)
+                else:
+                    for item in treeNode.children:
+                        child_str = getResultFromChild(item, level + 1, maxDepth, False)[0]
+                        if index >= 1:
+                            return_str += "、"
 
-                    return_str +=  strip_end_punctuation(child_str)
-                    index = index + 1
-                return_str += "任意一种情况出现"
+                        return_str +=  strip_end_punctuation(child_str)
+                        index = index + 1
+                    return_str += "任意一种情况出现"
             return [return_str, "", ""]
         elif treeNode.name == "绝对值":
             child = treeNode.children[0]
@@ -600,8 +691,8 @@ def getChildren(pid, treeNode):
 
 
 # queryAllDefectsMode()
-df = pd.DataFrame(columns=["id", "名称", "描述"])
-parseDefectById(377273, "中压级电气各母线变压器电气参数异常", df)
+# df = pd.DataFrame(columns=["id", "名称", "描述"])
+# parseDefectById(89256,'', "中压级电气各母线变压器电气参数异常", df)
 
 
 # 50111
