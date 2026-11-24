@@ -626,7 +626,8 @@ def check_same(node, time):
             node.partOfTo.append(node.children[0].partOfTo[0])
             print(f"new part: {node.partOfTo[0].name}")
             for c in node.children:
-                print(f"old child: {c.name}, name:{c.partOfTo[0].name}")
+                if c.partOfTo:
+                    print(f"old child: {c.name}, name:{c.partOfTo[0].name}")
                 c.partOfTo = []
     for c in node.children:
         check_same(c, time)

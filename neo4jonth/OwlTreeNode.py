@@ -11,8 +11,9 @@ class OwlTreeNode:
         self.partOfTo = []
 
     def add_child(self, child_node):
-        """添加子节点"""
-        self.children.append(child_node)
+        """添加子节点，按对象身份去重，防止重复边导致同一节点被加两次"""
+        if child_node not in self.children:
+            self.children.append(child_node)
 
     def add_parent(self, parent_node):
         """添加子节点"""
