@@ -34,6 +34,9 @@ def run_cypher(cypher: str, params: dict | None = None):
 # 定义二维数组
 full_type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征', '测点','故障模式']
 type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征','', '故障模式']
+operation_list = ['与', '报警阈', '或', '小于', '大于','大于等于','等于比较','N取M','绝对值','小于等于','减号','同或']
+
+
 
 # full_type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征', '测点']
 # type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征']
@@ -463,6 +466,7 @@ def deal_subClass_type(index):
 for i in range(len(type_list)):
     deal_subClass_type(i)
 
+# 处理partOf关系
 for i in range(len(type_list)):
     deal_PartOf(i)
 
@@ -474,18 +478,18 @@ g = Graph()
 
 # Define namespaces
 # Use a generic namespace for the ontology
-base_ns = Namespace("http://voc.neo4j.com/datamodel#")
+base_ns = Namespace("http://owl.changgengtech.com/datamodel#")
 g.bind("", base_ns)
 g.bind("owl", OWL)
 g.bind("rdfs", RDFS)
 g.bind("xsd", XSD)
 
-instance_ns = Namespace("http://voc.neo4j.com/individual#")
+instance_ns = Namespace("http://owl.changgengtech.com/individual#")
 
-annotation_ns = Namespace("http://voc.neo4j.com/annotation#")
+annotation_ns = Namespace("http://owl.changgengtech.com/annotation#")
 
 # Create the ontology declaration
-ontology_uri = URIRef("http://voc.neo4j.com/datamodel")
+ontology_uri = URIRef("http://owl.changgengtech.com/datamodel")
 g.add((ontology_uri, RDF.type, OWL.Ontology))
 
 # Map Neo4j types to XSD types
