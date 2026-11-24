@@ -777,9 +777,12 @@ def pre_order(node, level=0):
                         type_str = 'defect_partOf'
                 part_of = base_ns[type_str]
                 g.add((part_of, RDF.type, OWL.TransitiveProperty))
-                g.add((part_of, RDFS.domain, class_uri))
                 partToUri = base_ns[part.name]
-                g.add((part_of, RDFS.range, partToUri))
+                restriction = BNode()
+                g.add((restriction, RDF.type, OWL.Restriction))
+                g.add((restriction, OWL.onProperty, part_of))
+                g.add((restriction, OWL.someValuesFrom, partToUri))
+                g.add((class_uri, RDFS.subClassOf, restriction))
 
     for c in node.children:
         pre_order(c, level + 1)
