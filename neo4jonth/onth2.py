@@ -1,4 +1,5 @@
 from collections import deque
+from token import STRING
 
 from exceptiongroup import catch
 from neo4j import GraphDatabase
@@ -10,7 +11,7 @@ from datetime import datetime, timezone, timedelta
 from rdflib.extras.infixowl import Class, Property, Restriction
 import pandas as pd
 
-from neo4jonth.defect.defectGraphToLan import parseDefectById
+from neo4jonth.defect.defectGraphToLan import parseDefectById, parseDefectTreeById
 
 URI = "bolt://localhost:7687"
 AUTH = ("neo4j", "P@ssw0rd")
@@ -35,11 +36,18 @@ def run_cypher(cypher: str, params: dict | None = None):
 full_type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征', '测点','故障模式']
 type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征','', '故障模式']
 operation_list = ['与', '报警阈', '或', '小于', '大于','大于等于','等于比较','N取M','绝对值','小于等于','减号','同或']
+# 当前符号用到多少了
+# operation_index_list = []
 
+operation_index_model_dic = {}
+operation_index_instance_dic = {}
 
+# 故障模式特征用到了多少
+defect_tezhen_index_model_dic = {}
+defect_tezhen_index_instance_dic = {}
 
 # full_type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征', '测点']
-# type_list = ['电厂', '机组', '系统', '子系统', '设备', '部件', '特征']
+# type_list = ['故障模式']
 
 # 二维数组，一维是full_type_list，二维是模板，模型，实例
 entity_arr = []
@@ -48,6 +56,10 @@ for item in type_list:
     entity_arr.append(item_list)
     for j in range(3):
         item_list.append({})
+
+# 初始化操作符index数组
+# for item in operation_list:
+#     operation_index_list.append(0)
 
 # 树的根节点
 tree = OwlTree("root")
@@ -237,6 +249,7 @@ def deal_subClass_type(index):
     deal_name_dic1 = entity_arr[index][1]
     all_name_set1 = set()
 
+    testCount1 = 0
     for item in results1:
         value = item['m']
         propTypeMap = item['propTypeMap']
@@ -248,14 +261,20 @@ def deal_subClass_type(index):
             format_name = value['名称']
         format_name = format_name.replace(" ", "")
         if format_name not in deal_name_dic0:
+            defect_tree = None
             if type == "故障模式":
                 df = pd.DataFrame(columns=["id", "名称", "描述"])
                 defect_content = parseDefectById(0, format_name, value['名称'], df)
                 # defect_content = 'abc'
                 value['modelFaultLogicDescription'] = defect_content
                 propTypeMap['modelFaultLogicDescription'] = 'STRING'
+                # if testCount1 < 20:
+                defect_tree = parseDefectTreeById(0, format_name)
+                #     testCount1 += 1
 
             treeNode = OwlTreeNode(format_name, value, 1, pName="", propTypeMap=propTypeMap)
+            if type == "故障模式" and defect_tree is not None:
+                treeNode.set_defectTree_node(defect_tree)
             deal_name_dic1[format_name] = treeNode
             all_name_set1.add(format_name)
             if format_name == 'MAA01Z4QM311TXB01':
@@ -363,6 +382,7 @@ def deal_subClass_type(index):
     deal_name_dic2 = entity_arr[index][2]
     all_name_set2 = set()
     # 处理重名
+    # testCount2 = 0
     for item in results2:
         value = item['m']
         id_m = item['id_m']
@@ -379,6 +399,7 @@ def deal_subClass_type(index):
             print(f"error2-7: {value['名称']}")
             format_name = value['名称']
 
+        defect_tree = None
         if type == "故障模式":
             df = pd.DataFrame(columns=["id", "名称", "描述"])
             defect_content = parseDefectById(0, format_name, value['名称'], df)
@@ -386,10 +407,16 @@ def deal_subClass_type(index):
             value['faultLogicDescription'] = defect_content
             propTypeMap['faultLogicDescription'] = 'STRING'
 
+            #if testCount2 < 10:
+            defect_tree = parseDefectTreeById(id_m, '')
+            #    testCount2 += 1
+
         if format_name not in deal_name_dic2:
             treeNode = OwlTreeNode(format_name, value, 2, pName="", propTypeMap=propTypeMap)
             deal_name_dic2[format_name] = treeNode
             all_name_set2.add(format_name)
+            if type == "故障模式" and defect_tree is not None:
+                treeNode.set_defectTree_node(defect_tree)
 
     print(f"Instance count:{len(deal_name_dic2)}")
 
@@ -586,7 +613,7 @@ def collect_ref(node, res, visited):
                         try:
                             ns_ts = int(value)
                         except Exception as e:
-                            print(e)
+                            print(f"error2: {e}")
                         sec = ns_ts / 1_000_000_000
                         dt = datetime.fromtimestamp(sec, tz=timezone.utc)
                         iso_str = dt.strftime('%Y-%m-%dT%H:%M:%S')
@@ -631,6 +658,187 @@ def check_same(node, time):
                 c.partOfTo = []
     for c in node.children:
         check_same(c, time)
+
+# 添加故障模式的顶层节点
+def add_defectTopNode():
+    class_uri1 = base_ns['算子']
+    g.add((class_uri1, RDF.type, OWL.Class))
+
+    class_uri2 = base_ns['故障模式中间节点']
+    g.add((class_uri2, RDF.type, OWL.Class))
+
+    class_uri3 = base_ns['故障模式特征']
+    g.add((class_uri3, RDF.type, OWL.Class))
+
+    for item in operation_list:
+        item_class_uri = base_ns[item]
+        g.add((item_class_uri, RDF.type, OWL.Class))
+        g.add((item_class_uri, RDFS.subClassOf, class_uri1))
+
+# 前序遍历故障模式
+def pre_order_defect(node,parent_uri, type):
+    # print(fnode.name)
+    cur_uri = None
+    if type == 2:
+        instance_uri = None
+        # 实例
+        if node.type == 0:
+            # 操作符
+            # print("a")
+            index = 0
+            if node.name in operation_index_instance_dic:
+                index = operation_index_instance_dic[node.name] + 1
+            operation_index_instance_dic[node.name] = index
+            cur_uri = instance_ns[f"{node.name}_{index}"]
+            # 设置关系
+            belongsTo = base_ns['useOperator']
+            g.add((belongsTo, RDF.type, OWL.TransitiveProperty))
+            belongsTo_uri = instance_ns[node.name]
+            g.add((cur_uri, belongsTo, belongsTo_uri))
+            try:
+                g.add((cur_uri, RDF.type, base_ns['故障模式中间节点']))
+            except Exception as e:
+                print(f"error: {e}")
+        else:
+            # 逻辑特征
+            index = 0
+            tezhen_code = node.valueDic['编码']
+            if tezhen_code in defect_tezhen_index_instance_dic:
+                index = defect_tezhen_index_instance_dic[tezhen_code] + 1
+            defect_tezhen_index_instance_dic[tezhen_code] = index
+            cur_uri = instance_ns[f"{tezhen_code}_{index}"]
+            try:
+                g.add((cur_uri, RDF.type, base_ns['故障模式特征']))
+            except Exception as e:
+                print(f"error1: {e}")
+            # 状态
+            if node.status is not None and len(node.status) > 0:
+                g.add((cur_uri, base_ns["status"], Literal(node.status, datatype=XSD.string)))
+
+            # 权重
+            if node.weight is not None:
+                g.add((cur_uri, base_ns["weight"], Literal(node.weight, datatype=XSD.string)))
+            # return
+
+        inputOf = base_ns['inputOf']
+        g.add((inputOf, RDF.type, OWL.TransitiveProperty))
+        hasInput = base_ns["hasInput"]
+        g.add((hasInput, RDF.type, OWL.TransitiveProperty))
+        try:
+            g.add((cur_uri, inputOf, parent_uri))
+            g.add((parent_uri, hasInput, cur_uri))
+        except Exception as e:
+            print(f"error3: {e}")
+        # g.add((instance_uri, RDF.type, parent_uri))
+
+        # 给实例增加注释属性
+        g.add((cur_uri, RDFS.label, Literal(node.name, datatype=XSD.string)))
+        for key, value in node.valueDic.items():
+            if key == "createdTime":
+                sec = 0
+                try:
+                    sec = int(value / 100000000)
+                except Exception as e:
+                    print(f"error4: {e}")
+                dt = datetime.fromtimestamp(sec, tz=timezone(timedelta(hours=8)))
+                iso_str = dt.strftime('%Y-%m-%d %H:%M:%S')
+                g.add((cur_uri, base_ns[key], Literal(iso_str, datatype=XSD.string)))
+            else:
+                g.add((cur_uri, base_ns[key], Literal(value, datatype=XSD.string)))
+
+    else:
+        # 模型
+        if node.type == 0:
+            # 操作符
+            index = 0
+            if node.name in operation_index_model_dic:
+                index = operation_index_model_dic[node.name] + 1
+            operation_index_model_dic[node.name] = index
+            cur_uri = base_ns[f"{node.name}_{index}"]
+            g.add((cur_uri, RDF.type, OWL.Class))
+            g.add((cur_uri, RDFS.subClassOf, base_ns['故障模式中间节点']))
+            # 设置class的属性
+
+            g.add((cur_uri, RDFS.label, Literal(node.name, datatype=XSD.string)))
+            # 属性
+            for key, value in node.valueDic.items():
+                prop_uri1 = base_ns[key]
+                g.add((prop_uri1, RDF.type, OWL.DatatypeProperty))
+                restriction_class1 = BNode()
+                g.add((restriction_class1, RDF.type, OWL.Restriction))
+                g.add((restriction_class1, OWL.onProperty, prop_uri1))
+                g.add((cur_uri, RDFS.subClassOf, restriction_class1))
+                g.add((restriction_class1, OWL.hasValue, Literal(value)))
+            # 设置关系
+            useOperator = base_ns["useOperator"]
+            g.add((useOperator, RDF.type, OWL.TransitiveProperty))
+            # g.add((useOperator, RDFS.domain, cur_uri))
+            # g.add((useOperator, RDFS.range, base_ns[node.name]))
+            restriction_class1 = BNode()
+            g.add((restriction_class1, RDF.type, OWL.Restriction))
+            g.add((restriction_class1, OWL.onProperty, useOperator))
+            g.add((cur_uri, RDFS.subClassOf, restriction_class1))
+            g.add((restriction_class1, OWL.someValuesFrom, base_ns[node.name]))
+        else:
+            # 逻辑特征
+            index = 0
+            tezhen_code = node.valueDic['编码']
+            if tezhen_code in defect_tezhen_index_model_dic:
+                index = defect_tezhen_index_model_dic[tezhen_code] + 1
+            defect_tezhen_index_model_dic[tezhen_code] = index
+            cur_uri = base_ns[f"{tezhen_code}_{index}"]
+            g.add((cur_uri, RDF.type, OWL.Class))
+            g.add((cur_uri, RDFS.subClassOf, base_ns['故障模式特征']))
+
+            # 状态
+            if node.status is not None and len(node.status) > 0:
+                prop_uri1 = base_ns["status"]
+                g.add((prop_uri1, RDF.type, OWL.DatatypeProperty))
+                restriction_class1 = BNode()
+                g.add((restriction_class1, RDF.type, OWL.Restriction))
+                g.add((restriction_class1, OWL.onProperty, prop_uri1))
+                g.add((cur_uri, RDFS.subClassOf, restriction_class1))
+                g.add((restriction_class1, OWL.hasValue, Literal(node.status)))
+
+            # 权重
+            if node.weight is not None:
+                prop_uri1 = base_ns["weight"]
+                g.add((prop_uri1, RDF.type, OWL.DatatypeProperty))
+                restriction_class1 = BNode()
+                g.add((restriction_class1, RDF.type, OWL.Restriction))
+                g.add((restriction_class1, OWL.onProperty, prop_uri1))
+                g.add((cur_uri, RDFS.subClassOf, restriction_class1))
+                g.add((restriction_class1, OWL.hasValue, Literal(node.weight)))
+
+            # 设置属性
+            for key, value in node.valueDic.items():
+                prop_uri1 = base_ns[key]
+                g.add((prop_uri1, RDF.type, OWL.DatatypeProperty))
+                restriction_class1 = BNode()
+                g.add((restriction_class1, RDF.type, OWL.Restriction))
+                g.add((restriction_class1, OWL.onProperty, prop_uri1))
+                g.add((cur_uri, RDFS.subClassOf, restriction_class1))
+                g.add((restriction_class1, OWL.hasValue, Literal(value)))
+            g.add((cur_uri, RDFS.label, Literal(node.name, datatype=XSD.string)))
+
+        inputOf = base_ns["inputOf"]
+        g.add((inputOf, RDF.type, OWL.TransitiveProperty))
+        restriction_class1 = BNode()
+        g.add((restriction_class1, RDF.type, OWL.Restriction))
+        g.add((restriction_class1, OWL.onProperty, inputOf))
+        g.add((cur_uri, RDFS.subClassOf, restriction_class1))
+        g.add((restriction_class1, OWL.someValuesFrom, parent_uri))
+
+        hasInput = base_ns["hasInput"]
+        g.add((hasInput, RDF.type, OWL.ObjectProperty))
+        restriction_class2 = BNode()
+        g.add((restriction_class2, RDF.type, OWL.Restriction))
+        g.add((restriction_class2, OWL.onProperty, hasInput))
+        g.add((parent_uri, RDFS.subClassOf, restriction_class2))
+        g.add((restriction_class2, OWL.someValuesFrom, cur_uri))
+    for c in node.children:
+        pre_order_defect(c, cur_uri, type)
+
 # 前序遍历
 def pre_order(node, level=0):
     if level  > 20:
@@ -680,7 +888,7 @@ def pre_order(node, level=0):
                     try:
                         sec = int(node.value[key] / 100000000)
                     except Exception as e:
-                        print(e)
+                        print(f"error5: {e}")
                     dt = datetime.fromtimestamp(sec, tz=timezone(timedelta(hours=8)))
                     iso_str = dt.strftime('%Y-%m-%d %H:%M:%S')
                     g.add((instance_uri, base_ns[key], Literal(iso_str, datatype=XSD.string)))
@@ -693,6 +901,13 @@ def pre_order(node, level=0):
                     except Exception as e:
                         print(f"error111: {key}")
                     g.add((instance_uri, base_ns[key], Literal(node.value[key], datatype=xsd_type)))
+            if node.defectTree_node is not None:
+                # 故障模式添加节点
+                try:
+                    if len(node.defectTree_node.root.children) > 0:
+                        pre_order_defect(node.defectTree_node.root.children[0], p_uri, node.type)
+                except Exception as e:
+                    print(f"error111: {node.name}")
 
         else:
             # 0和1： 模板和模型，定义为class
@@ -733,7 +948,7 @@ def pre_order(node, level=0):
                     try:
                         sec = int(node.value[key] / 100000000)
                     except Exception as e:
-                        print(e)
+                        print(f"error6: {e}")
                     dt = datetime.fromtimestamp(sec, tz=timezone(timedelta(hours=8)))
                     iso_str = dt.strftime('%Y-%m-%d %H:%M:%S')
                     g.add((class_uri, class_Annotation, Literal(iso_str, datatype=XSD.string)))
@@ -745,15 +960,13 @@ def pre_order(node, level=0):
             prop_uri_faultLogicDescription = base_ns["faultLogicDescription"]
             g.add((prop_uri_faultLogicDescription, RDF.type, OWL.DatatypeProperty))
 
-            # 故障模式model的注释属性
-            # if node.type == 1:
-            #     defect_Annotation_uri = annotation_ns["modelFaultLogicDescription"]
-            #     g.add((defect_Annotation_uri, RDF.type, OWL.AnnotationProperty))
-            #     # 获取故障模式的描述
-            #     df = pd.DataFrame(columns=["id", "名称", "描述"])
-            #     defect_content = parseDefectById(0, node.value['编码'], node.value['名称'], df)
-            #     g.add((defect_Annotation_uri, RDFS.label, Literal("modelFaultLogicDescription")))
-            #     g.add((class_uri, defect_Annotation_uri, Literal(defect_content, datatype=XSD.string)))
+            if node.defectTree_node is not None:
+                # 故障模式
+                try:
+                    if len(node.defectTree_node.root.children) > 0:
+                        pre_order_defect(node.defectTree_node.root.children[0], class_uri, node.type)
+                except Exception as e:
+                    print(f"error7: {node.name}, {e}")
 
         # 添加关系
         for part in node.partOfTo:
@@ -762,7 +975,6 @@ def pre_order(node, level=0):
                 if '类别' in node.value:
                     if node.value['类别'] == '故障模式':
                         type_str = 'defect_belongsTo'
-
 
                 # 实例
                 # print("aa")
@@ -785,11 +997,14 @@ def pre_order(node, level=0):
                 g.add((restriction, OWL.someValuesFrom, partToUri))
                 g.add((class_uri, RDFS.subClassOf, restriction))
 
+
     for c in node.children:
         pre_order(c, level + 1)
 
 check_same(tree.root, 1)
 check_same(tree.root, 2)
+
+add_defectTopNode()
 
 # 前序遍历
 pre_order(tree.root, 0)

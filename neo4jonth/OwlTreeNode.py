@@ -1,3 +1,6 @@
+from neo4jonth.defect import DefectTreeNode
+
+
 class OwlTreeNode:
     def __init__(self, name,value,type, pName, propTypeMap):
         self.name = name
@@ -9,6 +12,8 @@ class OwlTreeNode:
         self.parents = set() # 父节点集合
         self.is_referenced = False # 标记是否被引用
         self.partOfTo = []
+        # 如果节点是故障模式，则其挂载的故障模式树
+        self.defectTree_node = None
 
     def add_child(self, child_node):
         """添加子节点，按对象身份去重，防止重复边导致同一节点被加两次"""
@@ -28,3 +33,6 @@ class OwlTreeNode:
     def remove_child(self, child_node):
         """移除子节点"""
         self.children = [c for c in self.children if c != child_node]
+
+    def set_defectTree_node(self, defectTree_node):
+        self.defectTree_node = defectTree_node

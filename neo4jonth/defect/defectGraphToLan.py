@@ -142,6 +142,21 @@ def start_with_tongshi(text):
 
 # def sortChildren(children):
 
+# 根据故障模式id得到tree
+def parseDefectTreeById(defectId, code):
+    print(f"defectId: {defectId}, code: {code}")
+    shadow_cyper1 = ''
+    if len(code) == 0:
+        shadow_cyper1 = f"MATCH(m) -[r: REFERENCE_SHADOW]->(n) where id(n)={defectId} return m, id(m) as id_m"
+    else:
+        shadow_cyper1 = f"MATCH(m) -[r: REFERENCE_SHADOW]->(n) where n.编码='{code}' return m, id(m) as id_m"
+    shadow_results = run_cypher(shadow_cyper1)
+    defectTree = DefectTree("root")
+    for res1 in shadow_results:
+        shadow_m = res1["id_m"]
+        getChildren(shadow_m, defectTree.root)
+    return defectTree
+
 
 # 根据故障模式id得到自然语言
 def parseDefectById(defecId, code, defect_name, df):
@@ -670,6 +685,7 @@ def getChildren(pid, treeNode):
         id_m = res["id_m"]
         labels = res["labels"]
         status = res["status"]
+        weight = res["weight"]
         if "FaultOperator" in labels:
             if 'name' not in m:
                 # print("error1")
@@ -678,6 +694,7 @@ def getChildren(pid, treeNode):
             treeNode.add_child(item_treeNode)
             getChildren(id_m, item_treeNode)
             item_treeNode.set_parent(treeNode)
+            item_treeNode.set_weight(weight)
         else:
 
             shadow_cyper1 = f"MATCH(n) -[r: REFERENCE_SHADOW]->(m) where id(n)={id_m} return m, id(m) as id_m"
@@ -688,12 +705,16 @@ def getChildren(pid, treeNode):
                 item_treeNode = DefectTreeNode(m['名称'], m, 1, status= status)
                 treeNode.add_child(item_treeNode)
                 item_treeNode.set_parent(treeNode)
+                if weight is not None:
+                    item_treeNode.set_weight(weight)
 
 
 # queryAllDefectsMode()
 # df = pd.DataFrame(columns=["id", "名称", "描述"])
 # parseDefectById(89256,'', "中压级电气各母线变压器电气参数异常", df)
 
+node = parseDefectTreeById(0,'TL011TL131D0Q1UP051GQLY00001')
+print(node)
 
 # 50111
 # 89039
